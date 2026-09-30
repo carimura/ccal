@@ -65,9 +65,15 @@ enum KeyboardShortcuts {
             guard model.canDeleteEditing else { return false }
             model.deleteEditing()
             return true
-        case 36: // return: jump into the title field
-            guard model.editing?.isEditable == true else { return false }
-            model.requestTitleFocus()
+        case 36: // return: open the editor, then jump into the title field
+            guard let session = model.editing else { return false }
+            if !session.showsEditor {
+                model.showEditor()
+            } else if session.isEditable {
+                model.requestTitleFocus()
+            } else {
+                return false
+            }
             return true
         default: break
         }

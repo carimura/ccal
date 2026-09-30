@@ -23,7 +23,10 @@ struct TimeGridView: View {
                 colWidth: max(40, (geo.size.width - Self.gutter * s) / CGFloat(days.count)),
                 gutter: Self.gutter * s, hourHeight: Self.hourHeight * s, cal: cal)
             VStack(spacing: 0) {
-                DayHeaderRow(days: days, colWidth: geometry.colWidth)
+                // Day view's title already names the date.
+                if days.count > 1 {
+                    DayHeaderRow(days: days, colWidth: geometry.colWidth)
+                }
                 AllDayRow(days: days, events: allDay, colWidth: geometry.colWidth)
                 Divider()
                 ScrollViewReader { proxy in
@@ -126,6 +129,14 @@ struct BlockFrame: LayoutValueKey {
     static let defaultValue = CGRect.zero
 }
 
+/// Converts `rect`, in the coordinates of the view handling the current click at `click`, to window
+/// points (top-left origin): where the editor popover attaches.
+func windowRect(_ rect: CGRect, click: CGPoint) -> CGRect? {
+    guard let event = NSApp.currentEvent, event.type == .leftMouseUp || event.type == .leftMouseDown,
+          let height = event.window?.contentView?.bounds.height else { return nil }
+    return rect.offsetBy(dx: event.locationInWindow.x - click.x, dy: height - event.locationInWindow.y - click.y)
+}
+
 /// All mouse handling for the grid: click to select, double-click to create, drag to create,
 /// move or resize. One gesture for the whole grid, so single clicks never wait on a double-click timer.
 private struct GridInteractionLayer: View {
@@ -136,6 +147,7 @@ private struct GridInteractionLayer: View {
 
     @State private var press: Press?
     @State private var hoverResize = false
+    @State private var hoveredID: String?
 
     private struct Press {
         let hit: GridGeometry.Hit
@@ -150,13 +162,18 @@ private struct GridInteractionLayer: View {
             .pointerStyle(hoverResize ? .rowResize : nil)
             .onContinuousHover { phase in
                 var resize = false
+                var hovered: String?
                 if case .active(let point) = phase, press == nil,
-                   case .event(_, true, _) = geometry.hit(point, blocks: blocks) {
-                    resize = true
+                   case .event(let id, let onEdge, _) = geometry.hit(point, blocks: blocks) {
+                    resize = onEdge
+                    hovered = id
                 }
                 if resize != hoverResize { hoverResize = resize }
+                if hovered != hoveredID { hoveredID = hovered }
             }
             .gesture(DragGesture(minimumDistance: 0).onChanged(changed).onEnded(ended))
+            // Blocks are drawn in a Canvas, so the menu targets whichever event the pointer is over.
+            .contextMenu { if let hoveredID { EventContextMenu(eventID: hoveredID) } }
     }
 
     private func changed(_ value: DragGesture.Value) {
@@ -215,6 +232,7 @@ private struct GridInteractionLayer: View {
                     model.move(id, start: moved.start, end: moved.end)
                 }
             case .empty:
+                showNewEventEditor(click: value.location)
                 model.isDragCreating = false
                 model.requestTitleFocus()
             case .outside:
@@ -225,15 +243,26 @@ private struct GridInteractionLayer: View {
         let isDoubleClick = (NSApp.currentEvent?.clickCount ?? 1) >= 2
         switch current.hit {
         case .event(let id, _, _):
-            model.open(id)
-            if isDoubleClick { model.requestTitleFocus() }
+            let anchor = blocks.last { $0.rect.contains(value.location) }.flatMap { windowRect($0.rect, click: value.location) }
+            model.open(id, anchor: anchor)
+            if isDoubleClick { model.showEditor(anchor: anchor) }
         case .empty(let dayIndex) where isDoubleClick:
             let start = geometry.minutes(atY: value.location.y, step: 30)
             model.newEvent(start: geometry.date(dayIndex: dayIndex, minutes: start),
                            end: geometry.date(dayIndex: dayIndex, minutes: min(start + 60, 1440)))
+            showNewEventEditor(click: value.location)
         case .empty, .outside:
             model.commit()
         }
+    }
+}
+
+extension GridInteractionLayer {
+    /// Attaches a just-created event's editor to its block.
+    fileprivate func showNewEventEditor(click: CGPoint) {
+        guard model.editing?.isNew == true, let event = model.editingDisplay,
+              let block = geometry.blocks(for: [event]).first else { return }
+        model.showEditor(anchor: windowRect(block.rect, click: click))
     }
 }
 
@@ -441,15 +470,18 @@ private struct AllDayRow: View {
                 Color.clear
                     .contentShape(Rectangle())
                     .frame(width: colWidth, height: height)
-                    .offset(x: (TimeGridView.gutter * s) + CGFloat(index) * colWidth)
-                    .onTapGesture {
+                    .onTapGesture { location in
                         if (NSApp.currentEvent?.clickCount ?? 1) >= 2 {
                             let start = cal.startOfDay(for: day)
                             model.newEvent(start: start, end: start, isAllDay: true)
+                            if model.editing?.isNew == true {
+                                model.showEditor(anchor: windowRect(CGRect(x: 0, y: 0, width: colWidth, height: height), click: location))
+                            }
                         } else {
                             model.commit()
                         }
                     }
+                    .offset(x: (TimeGridView.gutter * s) + CGFloat(index) * colWidth)
             }
 
             let shownSpans = spans.filter { !hiddenIDs.contains($0.id) }
@@ -458,11 +490,12 @@ private struct AllDayRow: View {
                 if let event = byID[span.id], let lane = lanes[span.id], lane < Self.maxVisibleLanes {
                     let selected = model.editing?.id == event.id
                     let matched = model.searchMatchIDs?.contains(event.id)
+                    let size = CGSize(width: CGFloat(span.last - span.first + 1) * colWidth - 4, height: (Self.laneHeight * s) - 2)
                     Text(event.title)
                         .font(.system(size: 11 * s, weight: .medium))
                         .lineLimit(1)
                         .padding(.horizontal, 6)
-                        .frame(width: CGFloat(span.last - span.first + 1) * colWidth - 4, height: (Self.laneHeight * s) - 2, alignment: .leading)
+                        .frame(width: size.width, height: size.height, alignment: .leading)
                         .foregroundStyle(selected ? Color.white : Color.primary)
                         .background(selected ? event.color : event.color.opacity(0.25), in: RoundedRectangle(cornerRadius: 4))
                         .overlay {
@@ -474,8 +507,13 @@ private struct AllDayRow: View {
                         }
                         .opacity(matched == false ? 0.25 : 1)
                         .contentShape(Rectangle())
+                        .onTapGesture { location in
+                            let anchor = windowRect(CGRect(origin: .zero, size: size), click: location)
+                            model.open(event.id, anchor: anchor)
+                            if (NSApp.currentEvent?.clickCount ?? 1) >= 2 { model.showEditor(anchor: anchor) }
+                        }
                         .offset(x: (TimeGridView.gutter * s) + CGFloat(span.first) * colWidth + 2, y: 2 + CGFloat(lane) * (Self.laneHeight * s))
-                        .onTapGesture { model.open(event.id) }
+                        .contextMenu { EventContextMenu(eventID: event.id) }
                 }
             }
         }
@@ -495,8 +533,10 @@ private struct GridBackground: View, Equatable {
             && a.geometry.hourHeight == b.geometry.hourHeight && a.tints == b.tints
     }
 
+    /// Day view has a single column, so there's nothing to set apart.
     private var tints: [Color?] {
-        geometry.days.map { day in
+        guard geometry.days.count > 1 else { return [] }
+        return geometry.days.map { day in
             geometry.cal.isDateInToday(day) ? Color.accentColor.opacity(0.11)
                 : geometry.cal.isDateInWeekend(day) ? Color.primary.opacity(0.025) : nil
         }

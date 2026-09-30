@@ -96,6 +96,8 @@ private struct MonthCell: View, Equatable {
     let selectedID: String?
     /// While searching: IDs in this cell that match (others fade); nil when not searching.
     let matches: Set<String>?
+    @State private var hoveredID: String?
+    @State private var size = CGSize.zero
 
     static let headerHeight: CGFloat = 26
     static let rowHeight: CGFloat = 17
@@ -118,21 +120,47 @@ private struct MonthCell: View, Equatable {
         Canvas { context, size in draw(in: context, size: size) }
             .contentShape(Rectangle())
             .onTapGesture(coordinateSpace: .local) { location in tapped(at: location) }
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
+            .onContinuousHover { phase in
+                var hovered: String?
+                if case .active(let point) = phase { hovered = eventID(at: point) }
+                if hovered != hoveredID { hoveredID = hovered }
+            }
+            .contextMenu { if let hoveredID { EventContextMenu(eventID: hoveredID) } }
+    }
+
+    private func row(at location: CGPoint) -> Int {
+        Int(((location.y - Self.headerHeight * s) / (Self.rowHeight * s)).rounded(.down))
+    }
+
+    /// The bar or chip at `location`, if any.
+    private func eventID(at location: CGPoint) -> String? {
+        let row = row(at: location)
+        let chipRow = row - laneIDs.count
+        if row >= 0, row < laneIDs.count, let id = laneIDs[row] { return id }
+        if chipRow >= 0 && chipRow < shownCount { return timed[chipRow].id }
+        return nil
     }
 
     private func tapped(at location: CGPoint) {
-        let row = Int(((location.y - Self.headerHeight * s) / (Self.rowHeight * s)).rounded(.down))
+        let row = row(at: location)
         let chipRow = row - laneIDs.count
-        if row >= 0, row < laneIDs.count, let id = laneIDs[row] {
-            model.open(id)
-        } else if chipRow >= 0 && chipRow < shownCount {
-            model.open(timed[chipRow].id)
+        // Click count instead of a count: 2 gesture, so single clicks don't wait for a double.
+        let isDoubleClick = (NSApp.currentEvent?.clickCount ?? 1) >= 2
+        if let id = eventID(at: location) {
+            let rowRect = CGRect(x: 2, y: Self.headerHeight * s + CGFloat(row) * Self.rowHeight * s,
+                                 width: size.width - 4, height: (Self.rowHeight - 1) * s)
+            let anchor = windowRect(rowRect, click: location)
+            model.open(id, anchor: anchor)
+            if isDoubleClick { model.showEditor(anchor: anchor) }
         } else if chipRow == shownCount && moreCount > 0 {
             model.show(day, in: .day)
-        } else if (NSApp.currentEvent?.clickCount ?? 1) >= 2 {
-            // Click count instead of a count: 2 gesture, so single clicks don't wait for a double.
+        } else if isDoubleClick {
             let start = model.cal.date(on: day, minutes: 9 * 60)
             model.newEvent(start: start, end: start.addingTimeInterval(3600))
+            if model.editing?.isNew == true {
+                model.showEditor(anchor: windowRect(CGRect(origin: .zero, size: size), click: location))
+            }
         } else {
             model.commit()
         }

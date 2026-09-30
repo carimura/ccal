@@ -462,21 +462,27 @@ final class AppModel {
 
     // MARK: - Editing
 
-    func open(_ id: String) {
+    /// Selects an event, and its calendar in the sidebar.
+    /// `anchor` is where the editor popover attaches if it's opened (see `showEditor`).
+    func open(_ id: String, anchor: CGRect? = nil) {
         guard editing?.id != id, let event = events.first(where: { $0.id == id }) else { return }
         finishEditing { [weak self] in
             let draft = EventDraft(event.ek)
             self?.editing = EditSession(
                 id: event.id, event: event.ek, isNew: false, isEditable: event.isEditable,
-                draft: draft, original: draft)
+                draft: draft, original: draft, anchor: anchor)
+            if let calendar = event.ek.calendar { self?.select(calendar) }
         }
     }
 
     func newEvent(start: Date, end: Date, isAllDay: Bool = false) {
         finishEditing { [weak self] in
             guard let self else { return }
+            // A read-only calendar selected in the sidebar means no new events (quietly, since it's on purpose).
             guard let calendar = newEventCalendar else {
-                errorMessage = "There's no calendar you can add events to. Add an account in System Settings → Internet Accounts."
+                if selectedCalendar == nil {
+                    errorMessage = "There's no calendar you can add events to. Add an account in System Settings → Internet Accounts."
+                }
                 return
             }
             // A new event on an unchecked calendar would vanish on save, so show that calendar.
@@ -484,7 +490,7 @@ final class AppModel {
             let draft = EventDraft(start: start, end: end, isAllDay: isAllDay, calendarID: calendar.calendarIdentifier)
             editing = EditSession(
                 id: "draft-\(UUID().uuidString)", event: EKEvent(eventStore: store.ekStore), isNew: true,
-                isEditable: true, draft: draft, original: draft)
+                isEditable: true, draft: draft, original: draft, showsEditor: true)
             titleFocusRequest += 1
         }
     }
@@ -543,6 +549,13 @@ final class AppModel {
     func cancelEditing() { editing = nil }
 
     func requestTitleFocus() { titleFocusRequest += 1 }
+
+    /// Opens the editor popover for the selected event, attached to `anchor` if given.
+    func showEditor(anchor: CGRect? = nil) {
+        guard editing != nil else { return }
+        if let anchor { editing?.anchor = anchor }
+        editing?.showsEditor = true
+    }
 
     /// Saves whatever is being edited, then runs `next`. If the event repeats, asks which
     /// occurrences to change first; cancelling that prompt keeps the editor open and skips `next`.
@@ -619,6 +632,26 @@ final class AppModel {
         }
     }
 
+    /// Right-click → Copy to: a new event with the same details on another calendar. Guests aren't
+    /// copied, so this never sends invites. Saves any open edits first so the copy includes them.
+    func copy(_ id: String, to calendar: EKCalendar) {
+        finishEditing { [weak self] in
+            guard let self, let source = events.first(where: { $0.id == id })?.ek else { return }
+            let copy = EKEvent(eventStore: store.ekStore)
+            var draft = EventDraft(source)
+            draft.calendarID = calendar.calendarIdentifier
+            draft.apply(to: copy, store: store, original: nil)
+            copy.timeZone = source.timeZone
+            copy.recurrenceRules = source.recurrenceRules?.map { $0.copy() as! EKRecurrenceRule }
+            do {
+                try store.save(copy, span: .thisEvent)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            invalidateAndReload()
+        }
+    }
+
     var canDeleteEditing: Bool {
         guard let s = editing else { return false }
         return s.isNew || s.isEditable
@@ -655,22 +688,25 @@ final class AppModel {
         save(s, span: .thisEvent)
     }
 
-    /// Selects a calendar in the sidebar (only ones you can add events to) and makes sure it's shown.
+    /// Selects a calendar in the sidebar and makes sure it's shown.
     func select(_ calendar: EKCalendar) {
-        guard calendar.allowsContentModifications else { return }
         selectedCalendarID = calendar.calendarIdentifier
         hiddenCalendarIDs.remove(calendar.calendarIdentifier)
     }
 
-    /// Where new events go: the sidebar selection, else the system default, else any writable calendar.
-    var newEventCalendar: EKCalendar? {
-        let writable = writableCalendars
-        if let id = selectedCalendarID, let match = writable.first(where: { $0.calendarIdentifier == id }) {
+    /// The sidebar selection, else the system default, else any writable calendar.
+    var selectedCalendar: EKCalendar? {
+        if let id = selectedCalendarID, let match = sidebarCalendars.first(where: { $0.calendarIdentifier == id }) {
             return match
         }
         if let fallback = store.defaultCalendarForNewEvents, fallback.allowsContentModifications {
             return fallback
         }
-        return writable.first
+        return writableCalendars.first
+    }
+
+    /// Where new events go: the selected calendar, or nil (no new events) when that one is read-only.
+    var newEventCalendar: EKCalendar? {
+        selectedCalendar.flatMap { $0.allowsContentModifications ? $0 : nil }
     }
 }

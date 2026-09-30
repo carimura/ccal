@@ -26,6 +26,7 @@ Privacy & Security → Calendars.
 | Edit | Click an event; edits save when you press Return or click away |
 | Discard edits | Esc |
 | Delete | Delete key (or Edit → Delete Event) |
+| Copy to another calendar | Right-click an event → Copy to |
 | Day / Week / Month | `D` `W` `M` or ⌘1 ⌘2 ⌘3 |
 | Previous / Next | ⌘← ⌘→ or `K` `J` |
 | Today | `T` or ⌘T |

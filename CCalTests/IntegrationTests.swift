@@ -169,6 +169,20 @@ struct ModelFlowTests {
         #expect(model.editing?.draft.title == "Daily sync")
     }
 
+    @Test func copyToAnotherCalendarKeepsTheOriginal() throws {
+        let event = store.addEvent("Dentist", Fixture.at(today, 9), Fixture.at(today, 10), on: work)
+        event.location = "Main St"
+        let model = makeModel()
+        model.copy(try #require(visible(model, "Dentist")).id, to: home)
+        #expect(store.saves.count == 1)
+        let copy = try #require(store.saves.first?.event)
+        #expect(copy !== event)
+        #expect(copy.calendar === home && event.calendar === work)
+        #expect(copy.title == "Dentist" && copy.location == "Main St")
+        #expect(copy.startDate == event.startDate && copy.endDate == event.endDate)
+        #expect(model.visibleDisplay.filter { $0.title == "Dentist" }.count == 2)
+    }
+
     @Test func deleteRemovesTheEvent() throws {
         store.addEvent("Old", Fixture.at(today, 18), Fixture.at(today, 19), on: home)
         let model = makeModel()
@@ -177,6 +191,14 @@ struct ModelFlowTests {
         #expect(store.removals.count == 1)
         #expect(visible(model, "Old") == nil)
         #expect(model.editing == nil)
+    }
+
+    @Test func selectingAnEventSelectsItsCalendar() throws {
+        store.addEvent("Gym", Fixture.at(today, 7), Fixture.at(today, 8), on: home)
+        let model = makeModel()
+        model.select(work)
+        model.open(try #require(visible(model, "Gym")).id)
+        #expect(model.newEventCalendar === home)
     }
 
     @Test func newEventsGoToTheSelectedCalendar() {

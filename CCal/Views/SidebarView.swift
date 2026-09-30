@@ -22,11 +22,11 @@ private struct CalendarListView: View {
             (groups[$0]?.first?.source?.title ?? "") < (groups[$1]?.first?.source?.title ?? "")
         }
 
-        let selectedID = model.newEventCalendar?.calendarIdentifier
+        let selectedID = model.selectedCalendar?.calendarIdentifier
         VStack(alignment: .leading, spacing: 16) {
             ForEach(sourceIDs, id: \.self) { sourceID in
                 let calendars = groups[sourceID] ?? []
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 7) {
                     Text(calendars.first?.source?.title ?? "Other")
                         .font(.system(size: 11 * s, weight: .semibold))
                         .foregroundStyle(.secondary)
@@ -92,6 +92,12 @@ private struct CalendarRow: View {
                 .contentShape(Rectangle())
                 .onTapGesture(perform: select)
                 .help(calendar.allowsContentModifications ? "New events go to \(calendar.title)" : "Read-only calendar")
+            if !calendar.allowsContentModifications {
+                Image(systemName: "dot.radiowaves.up.forward")
+                    .font(.system(size: 10 * s))
+                    .foregroundStyle(.secondary)
+                    .help("Read-only calendar")
+            }
         }
         .padding(.vertical, 2)
         .padding(.horizontal, 5)

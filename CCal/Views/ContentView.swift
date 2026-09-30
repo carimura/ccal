@@ -28,6 +28,8 @@ private struct MainView: View {
     @Environment(\.fontScale) private var s
     @Environment(AppModel.self) private var model
     @State private var eventMonitors: [Any] = []
+    /// The calendar area in window points, to turn a click location into the popover's anchor.
+    @State private var detailFrame = CGRect.zero
 
     var body: some View {
         @Bindable var model = model
@@ -47,10 +49,16 @@ private struct MainView: View {
             .navigationTitle(model.title)
             // The system title can't be restyled, so it's replaced by a larger label in the toolbar.
             .toolbar(removing: .title)
-            .inspector(isPresented: inspectorPresented) {
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { detailFrame = $0 }
+            .popover(item: editorPopover, attachmentAnchor: .rect(.rect(editorAnchor.rect)), arrowEdge: editorAnchor.edge) { _ in
                 EventInspector()
                     // Wide enough for the date + time pickers beside their labels; grows with text size.
-                    .inspectorColumnWidth(min: 340 * s, ideal: 370 * s, max: 520 * s)
+                    .frame(width: 370 * s)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .inspector(isPresented: searchPresented) {
+                SearchPanel()
+                    .inspectorColumnWidth(min: 300 * s, ideal: 340 * s, max: 520 * s)
             }
             .toolbar { toolbar }
         }
@@ -111,6 +119,7 @@ private struct MainView: View {
             .help("Day (D) · Week (W) · Month (M)")
             Button { model.newEventAtNextSlot() } label: { Label("New Event", systemImage: "plus") }
                 .help("New Event (N)")
+                .disabled(model.newEventCalendar == nil)
             Button { model.toggleSearchFromButton() } label: {
                 Label("Search", systemImage: "magnifyingglass")
             }
@@ -118,10 +127,33 @@ private struct MainView: View {
         }
     }
 
-    private var inspectorPresented: Binding<Bool> {
-        // Held back while drag-creating so the grid doesn't narrow under the cursor.
-        Binding(get: { (model.editing != nil || model.isSearching) && !model.isDragCreating },
-                set: { if !$0 { model.commit(); model.closeSearch() } })
+    private struct EditorPopover: Identifiable {
+        let id: String
+    }
+
+    /// Keyed by event, so opening another event re-points the popover. Held back while drag-creating
+    /// (until the mouse is released) and while the repeating-event prompt is up.
+    /// Clicking outside the popover saves, like clicking away did with the inspector.
+    private var editorPopover: Binding<EditorPopover?> {
+        Binding(get: {
+            guard let session = model.editing, session.showsEditor, !model.isDragCreating, model.spanPrompt == nil
+            else { return nil }
+            return EditorPopover(id: session.id)
+        }, set: { if $0 == nil { model.commit() } })
+    }
+
+    /// Beside the event's box, in this view's coordinates; below the top center when there's no box (⌘N).
+    private var editorAnchor: (rect: CGRect, edge: Edge) {
+        let bounds = CGRect(origin: .zero, size: detailFrame.size)
+        if let anchor = model.editing?.anchor {
+            let rect = anchor.offsetBy(dx: -detailFrame.minX, dy: -detailFrame.minY).intersection(bounds)
+            if !rect.isNull { return (rect, .trailing) }
+        }
+        return (CGRect(x: bounds.midX, y: 0, width: 1, height: 1), .bottom)
+    }
+
+    private var searchPresented: Binding<Bool> {
+        Binding(get: { model.isSearching }, set: { if !$0 { model.closeSearch() } })
     }
 
     private var spanPromptPresented: Binding<Bool> {

@@ -239,6 +239,10 @@ struct EditSession {
     let isEditable: Bool
     var draft: EventDraft
     var original: EventDraft
+    /// The event's box on screen (window points, top-left origin), for the editor popover to attach to.
+    var anchor: CGRect?
+    /// A single click only selects; the editor popover opens on double-click, Return, or for new events.
+    var showsEditor = false
 
     var hasChanges: Bool { draft != original }
 }

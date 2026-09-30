@@ -6,28 +6,11 @@ struct EventInspector: View {
 
     var body: some View {
         if let session = model.editing {
-            VStack(spacing: 0) {
-                if model.isSearching {
-                    Button { model.commit() } label: {
-                        Label("Results", systemImage: "chevron.left")
-                    }
-                    .buttonStyle(.borderless)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 10)
-                }
-                // No .id(session.id): switching events updates the same form instead of rebuilding it
-                // (rebuilding the native date pickers was most of the cost of selecting an event).
-                if session.isEditable {
-                    EventEditor(session: session)
-                } else {
-                    EventDetails(event: session.event)
-                }
+            if session.isEditable {
+                EventEditor(session: session)
+            } else {
+                EventDetails(event: session.event)
             }
-        } else if model.isSearching {
-            SearchPanel()
-        } else {
-            ContentUnavailableView("No Event Selected", systemImage: "calendar")
         }
     }
 }
@@ -110,17 +93,16 @@ private struct EventEditor: View {
 
                     InspectorCard {
                         // A TextEditor (not a TextField) so Return starts a new line instead of saving.
+                        // The Text doubles as the placeholder and, invisibly, sizes the box to the notes.
                         ZStack(alignment: .topLeading) {
-                            if model.draft.notes.isEmpty {
-                                Text("Notes")
-                                    .foregroundStyle(Color(nsColor: .placeholderTextColor))
-                                    .padding(.leading, 5)
-                                    .allowsHitTesting(false)
-                            }
+                            Text(model.draft.notes.isEmpty ? "Notes" : model.draft.notes + "\n")
+                                .foregroundStyle(model.draft.notes.isEmpty ? Color(nsColor: .placeholderTextColor) : .clear)
+                                .padding(.leading, 5)
+                                .allowsHitTesting(false)
                             TextEditor(text: $model.draft.notes)
                                 .scrollContentBackground(.hidden)
-                                .frame(height: 160 * s)
                         }
+                        .frame(minHeight: 50 * s, maxHeight: 160 * s)
                     }
                 }
                 .padding(12)
@@ -144,7 +126,15 @@ private struct EventEditor: View {
             }
             .padding(12)
         }
-        .onAppear { if session.isNew { titleFocused = true } }
+        .onAppear {
+            if session.isNew {
+                titleFocused = true
+            } else {
+                // The popover focuses its first field by itself, which would send typing (and the
+                // single-key shortcuts) into an existing event's title.
+                DispatchQueue.main.async { NSApp.keyWindow?.makeFirstResponder(nil) }
+            }
+        }
         .onChange(of: session.id) { if session.isNew { titleFocused = true } }
         .onChange(of: model.titleFocusRequest) { titleFocused = true }
     }
@@ -346,5 +336,24 @@ enum CalendarDot {
         }
         image.isTemplate = false
         return Image(nsImage: image)
+    }
+}
+
+/// Right-click menu for an event: Copy to ▸ any other calendar you can add events to.
+struct EventContextMenu: View {
+    @Environment(AppModel.self) private var model
+    let eventID: String
+
+    var body: some View {
+        if let event = model.events.first(where: { $0.id == eventID }) {
+            let current = event.ek.calendar?.calendarIdentifier
+            Menu("Copy to") {
+                ForEach(model.writableCalendars.filter { $0.calendarIdentifier != current }, id: \.calendarIdentifier) { calendar in
+                    Button { model.copy(eventID, to: calendar) } label: {
+                        Label { Text(calendar.title) } icon: { CalendarDot.image(calendar.cgColor) }
+                    }
+                }
+            }
+        }
     }
 }
