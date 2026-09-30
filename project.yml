@@ -1,0 +1,57 @@
+name: CCal
+options:
+  bundleIdPrefix: com.chad
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    DEVELOPMENT_TEAM: Y6H3T7M96S
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: Apple Development
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+targets:
+  CCal:
+    type: application
+    platform: macOS
+    sources: [CCal]
+    info:
+      path: CCal/Info.plist
+      properties:
+        CFBundleDisplayName: CCal
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.productivity
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        NSCalendarsFullAccessUsageDescription: CCal shows and edits the calendars from your Mac's Internet Accounts.
+        NSCalendarsUsageDescription: CCal shows and edits the calendars from your Mac's Internet Accounts.
+    entitlements:
+      path: CCal/CCal.entitlements
+      properties:
+        com.apple.security.personal-information.calendars: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chad.ccal
+        PRODUCT_NAME: CCal
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_HARDENED_RUNTIME: YES
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+  CCalTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [CCalTests]
+    dependencies:
+      - target: CCal
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.chad.ccal.tests
+schemes:
+  CCal:
+    build:
+      targets:
+        CCal: all
+    test:
+      targets: [CCalTests]

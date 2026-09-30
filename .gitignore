@@ -1,0 +1,8 @@
+.DS_Store
+build.noindex/
+CCal.xcodeproj/
+CCal/Info.plist
+CCal/CCal.entitlements
+*.xcuserstate
+xcuserdata/
+*.xcresult
