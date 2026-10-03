@@ -20,6 +20,15 @@ struct CalEvent: Identifiable {
         return "\(ek.calendarItemIdentifier)|\(occurrence.timeIntervalSinceReferenceDate)"
     }
 
+    /// Start and end as shown. An all-day event can come back from EventKit at the time of day it had
+    /// before it was made all-day (e.g. 9 AM to 8:59:59 AM the next day): the occurrence cache keeps
+    /// the old time even though the event itself is saved from midnight. Shifted back to midnight here.
+    static func dates(of ek: EKEvent, in cal: Calendar = .current) -> (start: Date, end: Date) {
+        guard ek.isAllDay else { return (ek.startDate, ek.endDate) }
+        let offset = ek.startDate.timeIntervalSince(cal.startOfDay(for: ek.startDate))
+        return (ek.startDate.addingTimeInterval(-offset), ek.endDate.addingTimeInterval(-offset))
+    }
+
     var hasGuests: Bool {
         (ek.attendees ?? []).contains { !$0.isCurrentUser }
     }
@@ -50,8 +59,7 @@ struct DisplayEvent: Identifiable, Equatable {
         id = event.id
         calendarID = event.ek.calendar?.calendarIdentifier ?? ""
         title = DisplayEvent.displayTitle(event.ek.title)
-        start = event.ek.startDate
-        end = event.ek.endDate
+        (start, end) = CalEvent.dates(of: event.ek)
         isAllDay = event.ek.isAllDay
         color = Color(cgColor: event.ek.calendar?.cgColor ?? CGColor(gray: 0.5, alpha: 1))
         location = event.ek.location
@@ -191,8 +199,7 @@ struct EventDraft: Equatable {
         let cal = Calendar.current
         title = ek.title ?? ""
         isAllDay = ek.isAllDay
-        start = ek.startDate
-        end = ek.endDate
+        (start, end) = CalEvent.dates(of: ek, in: cal)
         if isAllDay {
             start = cal.startOfDay(for: start)
             end = cal.startOfDay(for: max(start, end.addingTimeInterval(-1)))

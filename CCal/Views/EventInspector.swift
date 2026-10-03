@@ -228,7 +228,7 @@ private struct EventDetails: View {
 
     private var timeText: String {
         let cal = Calendar.current
-        let start = event.startDate!, end = event.endDate!
+        let (start, end) = CalEvent.dates(of: event, in: cal)
         if event.isAllDay {
             let last = cal.startOfDay(for: max(start, end.addingTimeInterval(-1)))
             if cal.isDate(start, inSameDayAs: last) { return start.formatted(date: .complete, time: .omitted) }
