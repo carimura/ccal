@@ -3,13 +3,19 @@ import SwiftUI
 struct MonthView: View {
     @Environment(\.fontScale) private var s
     @Environment(AppModel.self) private var model
+    /// An all-day bar being moved or stretched: the event as pressed, and where it would land.
+    @State private var barDrag: (event: DisplayEvent, preview: DisplayEvent)?
+    /// The edge handle being dragged, if any.
+    @State private var grabbedEdge: (event: DisplayEvent, grab: BarGrab)?
+    @State private var gridSize = CGSize.zero
+
+    private enum BarGrab { case middle(Date), start, end }
 
     var body: some View {
         let cal = model.cal
-        // Computed here, not from model.visibleDays, which shrinks as soon as the mode changes.
-        let days = cal.days(from: cal.startOfWeek(containing: cal.startOfMonth(containing: model.focusDate)), count: 42)
-        let buckets = DayBuckets.make(model.displayEvents.filter { !$0.isHidden }, days: days, cal: cal)
-            .map { $0.sorted(by: Self.order) }
+        let days = monthDays
+        let buckets = DayBuckets.make(shownEvents, days: days, cal: cal)
+            .map { $0.sorted { Self.order($0, $1, cal) } }
         let month = cal.component(.month, from: model.focusDate)
         let symbols = cal.orderedWeekdaySymbols(cal.shortStandaloneWeekdaySymbols)
         let selectedID = model.editing?.id
@@ -34,6 +40,21 @@ struct MonthView: View {
                 let weeks = (0..<6).map { row in
                     MonthWeekLayout.make(Array(buckets[row * 7 ..< row * 7 + 7]), rowStart: days[row * 7], maxRows: maxRows, cal: cal)
                 }
+                // Grab zones on both ends of editable all-day bars, for stretching them across days.
+                let handles = weeks.indices.flatMap { row in
+                    weeks[row].bars.filter { $0.event.isAllDay && $0.event.isEditable }.flatMap { bar in
+                        let y = CGFloat(row) * height + (MonthCell.headerHeight + CGFloat(bar.lane) * MonthCell.rowHeight) * s
+                        let size = CGSize(width: 8, height: (MonthCell.rowHeight - 1) * s)
+                        var ends: [(event: DisplayEvent, grab: BarGrab, rect: CGRect)] = []
+                        if !bar.continuesBefore {
+                            ends.append((bar.event, .start, CGRect(origin: CGPoint(x: CGFloat(bar.first) * width, y: y), size: size)))
+                        }
+                        if !bar.continuesAfter {
+                            ends.append((bar.event, .end, CGRect(origin: CGPoint(x: CGFloat(bar.last + 1) * width - 8, y: y), size: size)))
+                        }
+                        return ends
+                    }
+                }
                 BlockLayout {
                     ForEach(0..<42, id: \.self) { index in
                         let week = weeks[index / 7]
@@ -47,7 +68,8 @@ struct MonthView: View {
                             maxRows: maxRows,
                             // Only the cell holding the selection sees it, so selecting redraws one cell.
                             selectedID: timed.contains { $0.id == selectedID } ? selectedID : nil,
-                            matches: searchMatches.map { all in Set(timed.map(\.id).filter(all.contains)) })
+                            matches: searchMatches.map { all in Set(timed.map(\.id).filter(all.contains)) },
+                            dragBar: dragBar, dropBar: dropBar)
                         .equatable()
                         .layoutValue(key: BlockFrame.self, value: CGRect(
                             x: CGFloat(column) * width, y: CGFloat(index / 7) * height, width: width, height: height))
@@ -66,15 +88,91 @@ struct MonthView: View {
                     }
                 }
                 .frame(width: geo.size.width, height: geo.size.height)
+                .onGeometryChange(for: CGSize.self) { $0.size } action: { gridSize = $0 }
                 .overlay { MonthGridLines().allowsHitTesting(false) }
+                // One view for every handle, so the drag survives the bar wrapping onto another week.
+                .overlay {
+                    Color.clear
+                        .contentShape(Path { path in handles.forEach { path.addRect($0.rect) } })
+                        .pointerStyle(.columnResize)
+                        .gesture(DragGesture(minimumDistance: 1)
+                            .onChanged { value in
+                                guard let edge = grabbedEdge
+                                        ?? handles.last(where: { $0.rect.contains(value.startLocation) }).map({ ($0.event, $0.grab) })
+                                else { return }
+                                grabbedEdge = edge
+                                preview(edge.event, edge.grab, at: value.location)
+                            }
+                            .onEnded { _ in
+                                grabbedEdge = nil
+                                dropBar()
+                            })
+                }
             }
         }
     }
 
-    private static func order(_ a: DisplayEvent, _ b: DisplayEvent) -> Bool {
+    /// Computed here, not from model.visibleDays, which shrinks as soon as the mode changes.
+    private var monthDays: [Date] {
+        let cal = model.cal
+        return cal.days(from: cal.startOfWeek(containing: cal.startOfMonth(containing: model.focusDate)), count: 42)
+    }
+
+    /// Visible events, with any bar drag in progress applied.
+    private var shownEvents: [DisplayEvent] {
+        var shown = model.displayEvents.filter { !$0.isHidden }
+        if let barDrag, let i = shown.firstIndex(where: { $0.id == barDrag.event.id }) {
+            shown[i] = barDrag.preview
+        }
+        return shown
+    }
+
+    /// Moves the drag preview to the day under `point` (month grid coordinates). Grabbed in the middle
+    /// (on the given day), the whole event shifts; grabbed by an edge, that end follows.
+    private func preview(_ event: DisplayEvent, _ grab: BarGrab, at point: CGPoint) {
+        guard gridSize.width > 0, gridSize.height > 0 else { return }
+        let cal = model.cal
+        let column = min(max(Int(point.x / (gridSize.width / 7)), 0), 6)
+        let row = min(max(Int(point.y / (gridSize.height / 6)), 0), 5)
+        let day = monthDays[row * 7 + column]
+        var moved = event
+        switch grab {
+        case .middle(let grabbed):
+            let delta = cal.dayOffset(from: grabbed, to: day)
+            moved.start = cal.date(byAdding: .day, value: delta, to: event.start)!
+            moved.end = cal.date(byAdding: .day, value: delta, to: event.end)!
+        case .start:
+            moved.start = min(day, event.lastDay(in: cal))
+        case .end:
+            moved.end = cal.date(byAdding: .day, value: 1, to: max(day, cal.startOfDay(for: event.start)))!
+        }
+        barDrag = (event, moved)
+    }
+
+    /// A drag that started in the cell for `day`, on bar `id` if any; `point` is in that cell's coordinates.
+    /// The bar is looked up only once, since it leaves the cell as it moves.
+    private func dragBar(_ id: String?, from day: Date, at point: CGPoint) {
+        guard let event = barDrag?.event ?? model.displayEvents.first(where: { $0.id == id && $0.isEditable }),
+              let index = monthDays.firstIndex(of: day) else { return }
+        let origin = CGPoint(x: CGFloat(index % 7) * gridSize.width / 7, y: CGFloat(index / 7) * gridSize.height / 6)
+        preview(event, .middle(day), at: CGPoint(x: origin.x + point.x, y: origin.y + point.y))
+    }
+
+    private func dropBar() {
+        let cal = model.cal
+        if let (event, moved) = barDrag, moved.start != event.start || moved.lastDay(in: cal) != event.lastDay(in: cal) {
+            // All-day ends are given as the last day, as in drafts (see EventDraft.apply).
+            model.move(event.id, start: moved.start, end: moved.isAllDay ? moved.lastDay(in: cal) : moved.end)
+        }
+        barDrag = nil
+    }
+
+    private static func order(_ a: DisplayEvent, _ b: DisplayEvent, _ cal: Calendar) -> Bool {
         if a.isAllDayLike != b.isAllDayLike { return a.isAllDayLike }
         if a.isAllDayLike && a.start != b.start { return a.start < b.start }
-        if a.isAllDayLike { return a.end > b.end }
+        // By last day, not end: a selected event's end comes from its draft (midnight after its last day),
+        // not EventKit (23:59:59 on it), and selecting it shouldn't move it.
+        if a.isAllDayLike { return a.lastDay(in: cal) > b.lastDay(in: cal) }
         return a.start < b.start
     }
 }
@@ -96,6 +194,9 @@ private struct MonthCell: View, Equatable {
     let selectedID: String?
     /// While searching: IDs in this cell that match (others fade); nil when not searching.
     let matches: Set<String>?
+    /// A drag that started in this cell: the bar under where it started (if any), this day, and the pointer.
+    let dragBar: (String?, Date, CGPoint) -> Void
+    let dropBar: () -> Void
     @State private var hoveredID: String?
     @State private var size = CGSize.zero
 
@@ -120,6 +221,12 @@ private struct MonthCell: View, Equatable {
         Canvas { context, size in draw(in: context, size: size) }
             .contentShape(Rectangle())
             .onTapGesture(coordinateSpace: .local) { location in tapped(at: location) }
+            .gesture(DragGesture(minimumDistance: 3)
+                .onChanged { value in
+                    let row = row(at: value.startLocation)
+                    dragBar(row >= 0 && row < laneIDs.count ? laneIDs[row] : nil, day, value.location)
+                }
+                .onEnded { _ in dropBar() })
             .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
             .onContinuousHover { phase in
                 var hovered: String?

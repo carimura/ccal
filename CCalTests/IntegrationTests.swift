@@ -144,6 +144,22 @@ struct ModelFlowTests {
         #expect(visible(model, "Call")?.start == Fixture.at(today, 16, 30))
     }
 
+    /// Month view's edge drag passes an all-day event's new last day as the end.
+    @Test func stretchingAnAllDayEventSavesThroughItsNewLastDay() throws {
+        store.addEvent("Trip", today, today, on: work, allDay: true)
+        let model = makeModel(.month)
+        let event = try #require(visible(model, "Trip"))
+        let lastDay = today.addingTimeInterval(2 * 86400)
+        model.open(event.id)
+        model.move(event.id, start: event.start, end: lastDay)
+        #expect(store.saves.count == 1)
+        let shown = try #require(visible(model, "Trip"))
+        #expect(shown.lastDay(in: Calendar.current) == lastDay)
+        model.commit()
+        #expect(store.saves.count == 1, "the selected event's draft matches what was saved")
+        #expect(visible(model, "Trip")?.lastDay(in: Calendar.current) == lastDay)
+    }
+
     @Test func movingARepeatingEventAsksFirst() throws {
         let event = store.addEvent("Weekly 1:1", Fixture.at(today, 10), Fixture.at(today, 10, 30), on: work)
         event.recurrenceRules = RepeatRule.weekly.rules

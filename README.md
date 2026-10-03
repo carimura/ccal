@@ -23,6 +23,7 @@ Privacy & Security → Calendars.
 | Create event | Drag on the grid, double-click an empty slot, or `N` / ⌘N |
 | Create all-day event | Double-click the all-day row |
 | Move / resize | Drag an event / drag its bottom edge |
+| Move / stretch an all-day event (month) | Drag the bar onto another day / drag either end |
 | Edit | Click an event; edits save when you press Return or click away |
 | Discard edits | Esc |
 | Delete | Delete key (or Edit → Delete Event) |
