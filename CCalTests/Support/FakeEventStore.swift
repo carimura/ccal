@@ -12,6 +12,7 @@ final class FakeEventStore: EventStoring {
     private(set) var saves: [(event: EKEvent, span: EKSpan)] = []
     private(set) var removals: [(event: EKEvent, span: EKSpan)] = []
     private(set) var fetchCount = 0
+    var failAfterSaveCount: Int?
     /// Background prefetches read `stored` while tests mutate it on the main thread.
     private let lock = NSLock()
 
@@ -29,6 +30,9 @@ final class FakeEventStore: EventStoring {
     }
 
     func save(_ event: EKEvent, span: EKSpan) throws {
+        if let limit = failAfterSaveCount, saves.count >= limit {
+            throw NSError(domain: "FakeEventStore", code: 1, userInfo: [NSLocalizedDescriptionKey: "Save failed."])
+        }
         lock.withLock {
             saves.append((event, span))
             if !stored.contains(where: { $0 === event }) { stored.append(event) }

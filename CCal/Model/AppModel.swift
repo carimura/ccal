@@ -92,6 +92,8 @@ final class AppModel {
     var editing: EditSession?
     var spanPrompt: SpanPrompt?
     var errorMessage: String?
+    private(set) var isImportingICS = false
+    var importMessage: String?
     /// Bumped to ask the inspector to focus its title field.
     var titleFocusRequest = 0
 
@@ -708,5 +710,54 @@ final class AppModel {
     /// Where new events go: the selected calendar, or nil (no new events) when that one is read-only.
     var newEventCalendar: EKCalendar? {
         selectedCalendar.flatMap { $0.allowsContentModifications ? $0 : nil }
+    }
+
+    /// The drop captures the selection before loading files, so later clicks cannot redirect it.
+    func importICSFiles(_ urls: [URL], calendarID: String?) async {
+        guard !isImportingICS else { return }
+        importMessage = nil
+        guard hasAccess, let calendarID, let destination = store.calendar(withIdentifier: calendarID),
+              destination.allowsContentModifications else {
+            errorMessage = "Select a writable calendar before importing .ics files."
+            return
+        }
+        let files = urls.filter { $0.isFileURL && $0.pathExtension.lowercased() == "ics" }
+        guard !files.isEmpty else { return }
+        isImportingICS = true
+        defer { isImportingICS = false }
+        var imported = 0
+        var earliestImportedDate: Date?
+        var failures: [String] = []
+        for url in files {
+            var savedInFile = 0
+            do {
+                let parsed = try await Task.detached(priority: .userInitiated) {
+                    let scoped = url.startAccessingSecurityScopedResource()
+                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                    let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                    guard size <= 10_000_000 else { throw ICSImportError("The file exceeds the 10 MB import limit.") }
+                    return try ICSImport.parse(Data(contentsOf: url))
+                }.value
+                let events = try parsed.map { try $0.makeEvent(in: store.ekStore, calendar: destination) }
+                for event in events {
+                    try store.save(event, span: .thisEvent)
+                    let start = CalEvent.dates(of: event, in: cal).start
+                    earliestImportedDate = min(earliestImportedDate ?? start, start)
+                    imported += 1
+                    savedInFile += 1
+                }
+            } catch {
+                let partial = savedInFile == 0 ? "" : " \(savedInFile) events from this file were already imported; importing it again will duplicate them."
+                failures.append("\(url.lastPathComponent): \(error.localizedDescription)\(partial)")
+            }
+        }
+        if imported > 0 {
+            hiddenCalendarIDs.remove(calendarID)
+            invalidateAndReload()
+            if let earliestImportedDate { focusDate = earliestImportedDate }
+        }
+        let summary = "Imported \(imported) \(imported == 1 ? "event" : "events") into \(destination.title)."
+        importMessage = summary
+        if !failures.isEmpty { errorMessage = ([summary] + failures).joined(separator: "\n\n") }
     }
 }

@@ -28,11 +28,19 @@ Privacy & Security → Calendars.
 | Discard edits | Esc |
 | Delete | Delete key (or Edit → Delete Event) |
 | Copy to another calendar | Right-click an event → Copy to |
+| Import .ics files | Select a calendar in the sidebar, then drop one or more `.ics` files onto the day, week, or month view |
 | Day / Week / Month | `D` `W` `M` or ⌘1 ⌘2 ⌘3 |
 | Previous / Next | ⌘← ⌘→ or `K` `J` |
 | Today | `T` or ⌘T |
 
 Single-key shortcuts are ignored while you're typing in a text field.
+
+Imports create new personal copies, preserving titles, dates, standard time zones, locations, notes,
+links, display reminders, and daily/weekly/monthly/yearly repeat rules. Attendees and organizers are
+not imported; no invitations are sent. Dropping the same file again creates another copy.
+After importing, the current view jumps to the earliest successfully imported event's date.
+Files with recurrence exceptions, custom time zones, or unsupported repeat rules show an error before
+any events in that file are saved. Other files in the drop still import. Each file can be up to 10 MB.
 
 ## Tests
 

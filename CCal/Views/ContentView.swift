@@ -30,6 +30,7 @@ private struct MainView: View {
     @State private var eventMonitors: [Any] = []
     /// The calendar area in window points, to turn a click location into the popover's anchor.
     @State private var detailFrame = CGRect.zero
+    @State private var isImportTargeted = false
 
     var body: some View {
         @Bindable var model = model
@@ -46,6 +47,45 @@ private struct MainView: View {
                 }
             }
             .background(Color(nsColor: .textBackgroundColor))
+            .dropDestination(for: URL.self) { urls, _ in
+                let files = urls.filter { $0.isFileURL && $0.pathExtension.lowercased() == "ics" }
+                guard !files.isEmpty, !model.isImportingICS else { return false }
+                let calendarID = model.selectedCalendar?.calendarIdentifier
+                Task { await model.importICSFiles(files, calendarID: calendarID) }
+                return true
+            } isTargeted: { isImportTargeted = $0 }
+            .overlay {
+                if isImportTargeted {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.accentColor.opacity(0.1))
+                        .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(Color.accentColor, lineWidth: 3) }
+                        .overlay {
+                            Text(model.newEventCalendar.map { "Import .ics into \($0.title)" } ?? "Select a writable calendar to import")
+                                .font(.headline)
+                                .padding()
+                                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                        }
+                        .allowsHitTesting(false)
+                }
+            }
+            .overlay(alignment: .top) {
+                if model.isImportingICS || model.importMessage != nil {
+                    HStack {
+                        if model.isImportingICS {
+                            ProgressView().controlSize(.small)
+                            Text("Importing events…")
+                        } else {
+                            Text(model.importMessage ?? "")
+                            Button { model.importMessage = nil } label: { Image(systemName: "xmark") }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Dismiss import status")
+                        }
+                    }
+                    .padding(10)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    .padding(8)
+                }
+            }
             .navigationTitle(model.title)
             // The system title can't be restyled, so it's replaced by a larger label in the toolbar.
             .toolbar(removing: .title)
@@ -54,6 +94,8 @@ private struct MainView: View {
                 EventInspector()
                     // Wide enough for the date + time pickers beside their labels; grows with text size.
                     .frame(width: 370 * s)
+                    // Bound the scroll viewport so long guest lists and notes don't grow offscreen.
+                    .frame(maxHeight: min(600 * s, max(1, detailFrame.height - 32)))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .inspector(isPresented: searchPresented) {
