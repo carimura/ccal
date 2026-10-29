@@ -4,12 +4,12 @@ options:
   deploymentTarget:
     macOS: "26.0"
   createIntermediateGroups: true
+configFiles:
+  Debug: Signing.xcconfig
+  Release: Signing.xcconfig
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    DEVELOPMENT_TEAM: Y6H3T7M96S
-    CODE_SIGN_STYLE: Manual
-    CODE_SIGN_IDENTITY: Apple Development
     ENABLE_USER_SCRIPT_SANDBOXING: YES
 targets:
   CCal:

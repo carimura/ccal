@@ -6,3 +6,4 @@ CCal/CCal.entitlements
 *.xcuserstate
 xcuserdata/
 *.xcresult
+Local.xcconfig

@@ -1,0 +1,7 @@
+// Ad-hoc signing by default, so anyone can build. To sign with your own team (keeps the
+// Calendars grant across rebuilds), create Local.xcconfig next to this file (gitignored):
+//   DEVELOPMENT_TEAM = <your team ID>
+//   CODE_SIGN_IDENTITY = Apple Development
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = -
+#include? "Local.xcconfig"
